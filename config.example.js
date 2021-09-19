@@ -1,4 +1,5 @@
 const config = {
+  scraperJar: "scraper.jar",
   calendarName: 'example-calendar-name',
   DAVClient: {
     serverUrl: 'https://cloud.links-wien.at/remote.php/dav/calendars/*username*/',

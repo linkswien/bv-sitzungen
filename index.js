@@ -1,26 +1,39 @@
 const tsdav = require('tsdav')
 const ical = require('ical-generator')
+const childProcess = require('child_process')
 const config = require('./config.js')
+const fs = require("fs");
+const path = require("path");
 
-const events = [
-  {
-    "district": 20,
-    "date": 1639587600000,
-    "address": "HdB Brigittenau, 1200 Wien, Raffaelgasse 11-13",
-    "additionalInfo": "Aufgrund der Covid19-Maßnahmen Livestream - nur limitierte Besucherzahl. Anmeldung in der BV 20 erforderlich!"
-  },
-  {
-    "district": 2,
-    "date": 1639587600000,
-    "address": "Catamaran",
-    "additionalInfo": "Aufgrund der Covid19-Maßnahmen Livestream - nur limitierte Besucherzahl. Anmeldung in der BV 2 erforderlich!"
-  },
-]
-
-// Get all districts about to be updated
-const districts = [...new Set(events.map(event => String(event.district).padStart(2, '0')))];
+function execute(command) {
+  return new Promise((resolve, reject) => {
+    childProcess.exec(command, (error, stdout, stderr) => {
+      if (error == null) {
+        resolve({stdout, stderr})
+      } else {
+        reject(error)
+      }
+    })
+  });
+}
 
 (async () => {
+  console.log("Loading events using web scraper")
+
+  const tempOutputFile = path.resolve("./.temp-output.json")
+  let events;
+  try {
+    await execute(`java -Xmx100M -jar "${config.scraperJar}" "${tempOutputFile}"`);
+    events = JSON.parse(fs.readFileSync(tempOutputFile, "utf-8"))
+  } finally {
+    if (fs.existsSync(tempOutputFile)) {
+      fs.unlinkSync(tempOutputFile)
+    }
+  }
+
+  console.log(`Found ${events.length} events. Syncing them`)
+
+  const districts = [...new Set(events.map(event => String(event["district"]).padStart(2, '0')))];
   const client = await tsdav.createDAVClient(config.DAVClient)
 
   // Fetch all calendars and select the one with configured name
@@ -37,7 +50,7 @@ const districts = [...new Set(events.map(event => String(event.district).padStar
   })
 
   // Delete all events from districts that will be updated
-  deleteOldEvents = districts.map(district => {
+  const deleteOldEvents = districts.map(district => {
     console.log(`Deleting all events from BV${district}`)
     const districtCalendarObjects = calendarObjects.filter(object => object.url.includes(`sitzung-BV${district}`))
 
@@ -56,7 +69,7 @@ const districts = [...new Set(events.map(event => String(event.district).padStar
     // then another 3 sec
     .then(() => new Promise(resolve => setTimeout(() => resolve(), 3000)))
     .then(() => {
-      events.map((event) => {
+      const createPromises = events.map((event) => {
         console.log(`Adding new event to calendar ${event.district}`)
 
         const createICalString = (event) => {
@@ -68,16 +81,19 @@ const districts = [...new Set(events.map(event => String(event.district).padStar
             description: event.additionalInfo,
             location: event.address,
           })
-          const newIcalString = newIcalObject.toString()
-          return newIcalString
+          return newIcalObject.toString()
         }
 
-        const result = client.createCalendarObject({
+        return client.createCalendarObject({
           calendar: calendar,
           filename: `sitzung-BV${String(event.district).padStart(2, '0')}-${event.date}.ics`,
           iCalString: createICalString(event),
         }).then((response) => console.log(response.statusText, event.district, event.date))
       })
-    })
 
+      return Promise.all(createPromises)
+    })
+    .then(() => {
+      console.log("Successfully synced all events")
+    })
 })().catch(err => console.log(err))

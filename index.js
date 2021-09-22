@@ -5,6 +5,35 @@ const config = require('./config.js')
 const fs = require("fs");
 const path = require("path");
 
+const districtName = (district) => {
+  const districts = {
+    1: 'Innere Stadt',
+    2: 'Leopoldstadt',
+    3: 'Landstraße',
+    4: 'Wieden',
+    5: 'Margareten',
+    6: 'Mariahilf',
+    7: 'Neubau',
+    8: 'Josefstadt',
+    9: 'Alsergrund',
+    10: 'Favoriten',
+    11: 'Simmering',
+    12: 'Meidling',
+    13: 'Hietzing',
+    14: 'Penzing',
+    15: 'Rudolfsheim-Fünfhaus',
+    16: 'Ottakring',
+    17: 'Hernals',
+    18: 'Währing',
+    19: 'Döbling',
+    20: 'Brigittenau',
+    21: 'Floridsdorf',
+    22: 'Donaustadt',
+    23: 'Liesing'
+  }
+  return districts[district]
+}
+
 function execute(command) {
   return new Promise((resolve, reject) => {
     childProcess.exec(command, (error, stdout, stderr) => {
@@ -81,7 +110,7 @@ function execute(command) {
           newIcalObject.createEvent({
             start: new Date(event.date),
             end: new Date(event.date + 3600000),
-            summary: `Sitzung der Bezirksvertretung ${event.district}`,
+            summary: `[BV${String(event.district).padStart(2, '0')}] Bezirksvertretungssitzung ${districtName(event.district)}`,
             description: event.additionalInfo,
             location: event.address,
           })

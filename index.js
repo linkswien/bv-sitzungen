@@ -70,6 +70,10 @@ function execute(command) {
     .then(() => new Promise(resolve => setTimeout(() => resolve(), 3000)))
     .then(() => {
       const createPromises = events.map((event) => {
+        if (!config.filterDistricts.includes(event.district)) {
+          console.log(`Skip district ${event.district}`)
+          return
+        }
         console.log(`Adding new event to calendar ${event.district}`)
 
         const createICalString = (event) => {

@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
+  "author": "Bernhard Hayden",
   "license": "AGPL-3.0",
   "dependencies": {
     "ical-generator": "^3.0.0",

@@ -2,8 +2,9 @@ const tsdav = require('tsdav')
 const ical = require('ical-generator')
 const childProcess = require('child_process')
 const config = require('./config.js')
-const fs = require("fs");
-const path = require("path");
+const fs = require('fs')
+const path = require('path')
+const crypto = require('crypto')
 
 const districtName = (district) => {
   const districts = {
@@ -43,26 +44,28 @@ function execute(command) {
         reject(error)
       }
     })
-  });
+  })
 }
 
 (async () => {
-  console.log("Loading events using web scraper")
+  console.log('Loading events using web scraper...')
 
-  const tempOutputFile = path.resolve("./.temp-output.json")
-  let events;
+  let events
   try {
-    await execute(`java -Xmx100M -jar "${config.scraperJar}" "${tempOutputFile}"`);
-    events = JSON.parse(fs.readFileSync(tempOutputFile, "utf-8"))
+    await execute(`java -Xmx100M -jar "${config.scraperJar}" "${config.scraperJarOutput}"`)
+    events = JSON.parse(fs.readFileSync(config.scraperJarOutput, 'utf-8'))
   } finally {
-    if (fs.existsSync(tempOutputFile)) {
-      fs.unlinkSync(tempOutputFile)
+    if (fs.existsSync(config.scraperJarOutput)) {
+      fs.unlinkSync(config.scraperJarOutput)
     }
   }
 
-  console.log(`Found ${events.length} events. Syncing them`)
+  console.log(`Done! Found ${events.length} events. Syncing them...`)
 
-  const districts = [...new Set(events.map(event => String(event["district"]).padStart(2, '0')))];
+  // if filterDistricts is defined in config.js, use it to create array to loop over, else all updated districts
+  const districts = config.filterDistricts
+    ? config.filterDistricts.map(district => String(district).padStart(2, '0'))
+    : [...new Set(events.map(event => String(event['district']).padStart(2, '0')))]
   const client = await tsdav.createDAVClient(config.DAVClient)
 
   // Fetch all calendars and select the one with configured name
@@ -70,7 +73,7 @@ function execute(command) {
   const calendar = calendars.find(calendar => calendar.displayName === config.calendarName)
 
   if (!calendar) {
-    throw "Calendar name not found"
+    throw 'Calendar name not found. Abort!'
   }
 
   // Fetch all calendar objects (=events) from configured calendar
@@ -80,18 +83,22 @@ function execute(command) {
 
   // Delete all events from districts that will be updated
   const deleteOldEvents = districts.map(district => {
-    console.log(`Deleting all events from BV${district}`)
     const districtCalendarObjects = calendarObjects.filter(object => object.url.includes(`sitzung-BV${district}`))
+    console.log(`Deleting ${districtCalendarObjects.length} events from BV${district}`)
 
     return districtCalendarObjects.map((object) => {
-      console.log('Deleting existing event', object.url)
-      return client.deleteCalendarObject({
-        calendarObject: {
-          url: object.url,
-        }
+      return new Promise(resolve => {
+        client.deleteCalendarObject({
+          calendarObject: {
+            url: object.url,
+          }
+        }).then((response) => {
+          console.log(response.status === 204 ? `Deleted ${response.url}` : `${responseStatus} ${response.statusText}: ${response.url}`)
+          resolve()
+        })
       })
     })
-  })
+  }).flat()
 
   // Wait until all old events are deleted
   Promise.allSettled(deleteOldEvents)
@@ -99,11 +106,10 @@ function execute(command) {
     .then(() => new Promise(resolve => setTimeout(() => resolve(), 3000)))
     .then(() => {
       const createPromises = events.map((event) => {
-        if (!config.filterDistricts.includes(event.district)) {
-          console.log(`Skip district ${event.district}`)
+        if (config.filterDistricts && !config.filterDistricts.includes(event.district)) {
           return
         }
-        console.log(`Adding new event to calendar ${event.district}`)
+        console.log(`Adding new event from BV${String(event.district).padStart(2, '0')}`)
 
         const createICalString = (event) => {
           const newIcalObject = ical()
@@ -119,14 +125,14 @@ function execute(command) {
 
         return client.createCalendarObject({
           calendar: calendar,
-          filename: `sitzung-BV${String(event.district).padStart(2, '0')}-${event.date}.ics`,
+          filename: `sitzung-BV${String(event.district).padStart(2, '0')}-${event.date}-${crypto.randomUUID()}.ics`,
           iCalString: createICalString(event),
-        }).then((response) => console.log(response.statusText, event.district, event.date))
+        }).then((response) => console.log(response.status === 201 ? `Created ${response.url}` : `${responseStatus} ${response.statusText}: ${response.url}`))
       })
 
       return Promise.all(createPromises)
     })
     .then(() => {
-      console.log("Successfully synced all events")
+      console.log('Sync finished!')
     })
 })().catch(err => console.log(err))
